@@ -338,17 +338,35 @@ class SQLiteGenerator(generator.Generator):
         separator = expression.args.get("separator")
         return f"GROUP_CONCAT({distinct_sql}{self.format_args(this, separator)})"
 
-    def least_sql(self, expression: exp.Least) -> str:
-        if expression.expressions:
-            return rename_func("MIN")(self, expression)
+    def _greatest_least_sql(self, expression: exp.Greatest | exp.Least) -> str:
+        if not expression.expressions:
+            return self.sql(expression, "this")
 
-        return self.sql(expression, "this")
+        name = "MAX" if isinstance(expression, exp.Greatest) else "MIN"
+        args = [expression.this, *expression.expressions]
+
+        if not expression.args.get("ignore_nulls"):
+            return self.func(name, *args)
+
+        # SQLite's variadic MAX/MIN return NULL if any argument is NULL, so each argument is
+        # replaced by a COALESCE over a rotation of the whole list. Every non-NULL argument is
+        # still produced by the rotation that starts at it, and an all-NULL call stays NULL.
+        return self.func(
+            name,
+            *(
+                exp.Coalesce(
+                    this=arg.copy(),
+                    expressions=[other.copy() for other in args[i + 1 :] + args[:i]],
+                )
+                for i, arg in enumerate(args)
+            ),
+        )
+
+    def least_sql(self, expression: exp.Least) -> str:
+        return self._greatest_least_sql(expression)
 
     def greatest_sql(self, expression: exp.Greatest) -> str:
-        if expression.expressions:
-            return rename_func("MAX")(self, expression)
-
-        return self.sql(expression, "this")
+        return self._greatest_least_sql(expression)
 
     def transaction_sql(self, expression: exp.Transaction) -> str:
         this = expression.this

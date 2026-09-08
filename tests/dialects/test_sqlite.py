@@ -126,16 +126,33 @@ class TestSQLite(Validator):
         )
         self.validate_all(
             "SELECT MIN(a, b) FROM t",
-            read={
-                "postgres": "SELECT LEAST(a, b) FROM t",
-                "sqlite": "SELECT MIN(a, b) FROM t",
-            },
+            read={"sqlite": "SELECT MIN(a, b) FROM t"},
         )
         self.validate_all(
             "SELECT MAX(a, b) FROM t",
+            read={"sqlite": "SELECT MAX(a, b) FROM t"},
+        )
+        # LEAST/GREATEST skip NULL args in these dialects, but SQLite's MIN/MAX return NULL if
+        # any argument is NULL, so each argument becomes a COALESCE over a rotation of the list.
+        self.validate_all(
+            "SELECT MIN(COALESCE(a, b), COALESCE(b, a)) FROM t",
+            read={"postgres": "SELECT LEAST(a, b) FROM t"},
+        )
+        self.validate_all(
+            "SELECT MAX(COALESCE(a, b), COALESCE(b, a)) FROM t",
+            read={"postgres": "SELECT GREATEST(a, b) FROM t"},
+        )
+        self.validate_all(
+            "SELECT MAX(COALESCE(a, b, c), COALESCE(b, c, a), COALESCE(c, a, b)) FROM t",
+            read={"duckdb": "SELECT GREATEST(a, b, c) FROM t"},
+        )
+        # MySQL, BigQuery, Snowflake and Presto already return NULL if any argument is NULL,
+        # which is what SQLite does, so those keep the bare rename.
+        self.validate_all(
+            "SELECT MAX(a, b) FROM t",
             read={
-                "postgres": "SELECT GREATEST(a, b) FROM t",
-                "sqlite": "SELECT MAX(a, b) FROM t",
+                "mysql": "SELECT GREATEST(a, b) FROM t",
+                "bigquery": "SELECT GREATEST(a, b) FROM t",
             },
         )
         # CONCAT skips NULL args in these dialects, but || propagates it, so the
